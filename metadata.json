@@ -1,0 +1,8 @@
+{
+  "name": "Telegram QR Earning Bot Suite & Studio",
+  "description": "Production-ready Telegram QR Earning Bot with live interactive Telegram simulator, multi-user lock state, proof verification, UPI withdrawals, admin dashboard, and complete source code in Node.js and Python.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
