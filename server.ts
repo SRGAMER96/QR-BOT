@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { webhookCallback } from 'grammy';
 import { LiveTelegramBotRunner } from './src/server/liveBot.ts';
 
 dotenv.config();
@@ -18,12 +19,21 @@ app.use(express.json({ limit: '10mb' }));
 // Instantiate Live Telegram Bot Runner
 const liveBotRunner = new LiveTelegramBotRunner();
 
+// Mount Telegram Webhook for Production (Render, etc.)
+app.post('/api/telegram-webhook', (req: Request, res: Response) => {
+  if (liveBotRunner.bot) {
+    return webhookCallback(liveBotRunner.bot, 'express')(req, res);
+  }
+  return res.status(200).send('OK');
+});
+
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     botRunning: liveBotRunner.isRunning,
     botUsername: liveBotRunner.botInfo?.username,
+    isWebhookMode: liveBotRunner.isWebhookMode,
     timestamp: new Date().toISOString()
   });
 });
@@ -36,6 +46,10 @@ app.get('/api/bot/status', (_req: Request, res: Response) => {
 
   res.json({
     isRunning: liveBotRunner.isRunning,
+    isPollingActive: liveBotRunner.isPollingActive,
+    isPollingPaused: liveBotRunner.isPollingPaused,
+    isWebhookMode: liveBotRunner.isWebhookMode,
+    webhookUrl: liveBotRunner.webhookUrl,
     botInfo: liveBotRunner.botInfo,
     lastError: liveBotRunner.lastError,
     config: liveBotRunner.config,
@@ -47,6 +61,22 @@ app.get('/api/bot/status', (_req: Request, res: Response) => {
       pendingProofs: proofs.filter(p => p.status === 'pending').length
     },
     activeTask: liveBotRunner.db.data.activeTask
+  });
+});
+
+// Admin: Toggle local polling (to allow external deployment without 409 conflict)
+app.post('/api/bot/polling/toggle', (req: Request, res: Response) => {
+  const { action } = req.body;
+  if (action === 'pause') {
+    liveBotRunner.pausePolling();
+  } else {
+    liveBotRunner.resumePolling();
+  }
+  res.json({
+    success: true,
+    isPollingActive: liveBotRunner.isPollingActive,
+    isPollingPaused: liveBotRunner.isPollingPaused,
+    isWebhookMode: liveBotRunner.isWebhookMode
   });
 });
 

@@ -281,10 +281,13 @@ interface SessionData {
 type MyContext = Context & SessionFlavor<SessionData>;
 
 export class LiveTelegramBotRunner {
-  private bot: Bot<MyContext> | null = null;
+  public bot: Bot<MyContext> | null = null;
   public db: LiveDatabase;
   public isRunning: boolean = false;
   public isPollingActive: boolean = false;
+  public isWebhookMode: boolean = false;
+  public webhookUrl: string | null = null;
+  public isPollingPaused: boolean = false;
   public botInfo: any = null;
   public lastError: string | null = null;
   private shouldRun: boolean = true;
@@ -414,8 +417,32 @@ export class LiveTelegramBotRunner {
       this.botInfo = await this.bot.api.getMe();
       console.log(`✅ Telegram API Connected: @${this.botInfo.username} (${this.botInfo.first_name})`);
 
-      this.startPollingLoop();
-      this.startWatchdog();
+      // Check if running on Render or if WEBHOOK_URL is provided
+      const webhookBase = process.env.RENDER_EXTERNAL_URL || process.env.WEBHOOK_URL;
+      if (webhookBase && !process.env.FORCE_POLLING) {
+        this.isWebhookMode = true;
+        this.webhookUrl = `${webhookBase.replace(/\/$/, '')}/api/telegram-webhook`;
+        console.log(`🌐 Production Render detected! Activating Telegram Webhook: ${this.webhookUrl}`);
+        try {
+          await this.bot.api.setWebhook(this.webhookUrl, { drop_pending_updates: false });
+          console.log(`✅ Telegram Webhook successfully active at: ${this.webhookUrl}`);
+        } catch (whErr) {
+          console.error('Failed to set Telegram webhook, falling back to polling:', whErr);
+          this.isWebhookMode = false;
+        }
+      }
+
+      if (this.isWebhookMode) {
+        console.log('⚡ Telegram Bot running in WEBHOOK mode (Zero 409 conflict, instant responses)!');
+      } else {
+        if (this.isPollingPaused || process.env.DISABLE_TELEGRAM_POLLING === 'true') {
+          console.log('⏸️ Telegram polling is currently paused to allow production deployment to poll without conflict.');
+        } else {
+          this.startPollingLoop();
+          this.startWatchdog();
+        }
+      }
+
       this.startScheduledPings();
       this.setupMenuButton();
 
@@ -436,6 +463,25 @@ export class LiveTelegramBotRunner {
 
       return { success: false, error: this.lastError || undefined };
     }
+  }
+
+  public pausePolling() {
+    this.isPollingPaused = true;
+    if (this.bot && this.isPollingActive) {
+      try {
+        this.bot.stop();
+      } catch {}
+      this.isPollingActive = false;
+    }
+    console.log('⏸️ Telegram polling paused.');
+  }
+
+  public resumePolling() {
+    this.isPollingPaused = false;
+    if (!this.isWebhookMode && this.bot && !this.isPollingActive) {
+      this.startPollingLoop();
+    }
+    console.log('▶️ Telegram polling resumed.');
   }
 
   private async startPollingLoop() {
